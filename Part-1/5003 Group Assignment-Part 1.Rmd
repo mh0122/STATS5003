@@ -1,0 +1,189 @@
+---
+title: "5003 - Group Assignment Part-1"
+author: "Moal9049"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#install.packages('ggdist')
+
+library("dplyr")
+library(ggplot2)
+library(ggdist)
+library(corrplot)
+library(naniar)
+```
+
+### Overview
+Cardiovascular disease (CVD) is the leading cause of death around the world. The World Health Organisation (WHO) estimated that CVD was accountable for 16% of the world's total deaths during the year 2019, with deaths increasing more than 20% from the year 2000 (WHO 2019) The majority of individuals are usually diagnosed with a type of CVD after having common symptoms such as chest pain, heart attack or sudden cardiac arrest (insert reference). As a result, governments and scientists worldwide have been investing heavily in studying the leading indicators of CVD to reduce the death rate caused by such diseases.  
+Epidemiological studies and randomized clinical trials have shown that CVD is largely preventable (Cooper et al., 2000). Therefore, it is important to identify individuals at risk of being diagnosed with a type of CVD or not at an early stage to prevent life-threatening outcomes. 
+This study is concerned with a supervised binary classification problem to predict whether an individual should be diagnosed with CVD or not, by building prediction models based on the history of health risk factors of individuals.
+
+
+
+### Dataset Summary
+The Behavioural Risk Factor Surveillance System (BRFSS) data will be used to build the classification model, this dataset is sourced from an annual telephone survey collected by The Centres for Disease Control (CDC) for the year 2015 (CDC 2016), which captures information about individuals in the united states regarding their health behaviours, chronic seasides and use of preventative services (CDC 2014). This data set will be used to form the bases of the supervised classification model to predict individuals who reported coronary heart disease (CHD) or myocardial infarction (MI) (dependent variable ‘y’) which are two types of CVD. 
+
+``` {r Read dataset, echo=FALSE, out.width="50%"}
+
+#read data
+dat <- read.csv("2015.csv")
+
+
+# classify missing features
+target <- tibble(table(dat$X_MICHD[!is.na(dat$X_MICHD)]))
+target <- rename(target, Count = `table(dat$X_MICHD[!is.na(dat$X_MICHD)])`)
+target$Response <- c('Yes','No')
+target$tlabel <- paste0(round(target$Count/1000,1),'k')
+
+#plot missing features
+ggplot(target, aes(x = Count/1000, y = Response, fill = Response)) +
+  geom_col() +
+  geom_text(
+    aes(label = tlabel), 
+    ## make labels left-aligned
+    hjust = 0.5, nudge_x = 10
+  ) +
+  xlim(0, 410) +
+  labs(title = "Respondents reported having coronary heart disease",
+              subtitle = "Ever had CHD or MI?",
+              x = "Count ('000)", 
+              y = "Responded",
+              caption="Figure (1): Response Variable Distribution"
+       )+   
+  coord_flip() + 
+  ## change plot appearance
+  theme_minimal()
+```
+
+The dataset contains over 441,000 survey responses, with 329 features, with the majority of features being related to the individual contacted by the CDC, plus a binary (0 – 1) classification variable (dependent variable ‘y’) which indicates if the individual surveyed has been diagnosed with CVD. The data set includes a mix of numeric and categorical variables. All variables have been dummied with numerical values (i.e., 1 = ‘yes’, 2 = ‘no’, etc), which will be covered later in the data transformation task. The data dictionary of the variable names and descriptions is available on the CDC website and can be accessed via the following link https://tinyurl.com/mtn85zwy.
+
+
+
+
+### Dataset Challenges 
+In addition to the challenge brought by the size and complexity of the dataset - +440k observations and 329 variables - the dataset poses several challenges, there are additional key challenges that must be addressed in the 2nd phase of this project, these are:
+
+
+#### High dimensional features
+The high dimensional structure of the dataset introduces the issue of multicollinearity (Figure-2) which must be considered to ensure the accuracy of the fitted models. Multicollinearity occurs when one or more features are encoded with the same (or highly similar) information. The dataset at hand includes several features that are calculated from other responses which make them all highly correlated. To address this, we will review the codebook provided by CDC and remove all the features that may have little to no predictive input and perform PCA, Ridge and Lasso regression to further reduce the dimensionality of the dataset. 
+
+``` {r, echo=FALSE, out.width="75%"}
+#convert data to numeric in order to run correlations
+  #convert to factor first to keep the integrity of the data - each value will become a number rather than turn into NA
+  df_cor <- dat[,-c(seq(1:7))] # dropping variables 1-7, as they are related to the date/time of the survey 
+  df_cor <- df_cor %>% mutate_if(is.character, as.factor)
+  df_cor <- df_cor %>% mutate_if(is.factor, as.numeric)
+  #run a correlation and drop the insignificant ones
+  corr <- cor(df_cor)
+
+
+  #drop perfect correlations
+  corr[corr == 1] <- NA 
+  #turn into a 3-column table
+  corr <- as.data.frame(as.table(corr))
+  #remove the NA values from above 
+  corr <- na.omit(corr) 
+
+  #turn corr back into matrix in order to plot with corrplot
+  mtx_corr <- reshape2::acast(corr, Var1~Var2, value.var="Freq")
+  
+  #plot correlations visually
+  corrplot(mtx_corr, method ='color', 
+           is.corr=TRUE, tl.col="black", 
+           col = COL2('PuOr', 20), 
+           na.label=" ", 
+           number.cex = 0.1,   
+           tl.cex = 0.25,
+           mar=c(0,0,1,0),
+           cl.ratio = 0.2, cl.align = 'l',
+           title="Multicollinearity")
+  
+```
+
+#### Missingness of data
+The survey dataset provided require a regress data processing as over 70% of the overall features includes NAs in them (appendix-1). The histogram below shows the number of features and the percentage of NA values. Figure-3 shows that around 119 variables (36% of all features), have 75% or more of NAs in them. As a pre-processing technique, we will drop those variables that have an extremely high volume of NAs in them.
+
+```{r, echo=FALSE, out.width="50%"}
+
+missing.variables <- cbind(miss_var_summary(dat)[1],round(miss_var_summary(dat)[3],2))
+onlymissing <- missing.variables[missing.variables$pct_miss != 0,]
+
+onlymissing  %>%
+  ggplot( aes(x=pct_miss)) +
+    geom_histogram( bins=20, fill="#69b3a2", color="#e9ecef", alpha=0.9)+  
+    geom_text(aes(label = ..count..), 
+              stat = 'bin', 
+              bins=20,
+              vjust = -0.5) +
+    labs(title = "Frequency of Variables and Percentage of Missing Data",
+              y = "# of Features", 
+              x = "Percentage (%) of missing data",
+              caption="Figure (3): Missing values summary"
+       )+
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size=15)
+    )
+
+
+```
+
+
+
+#### Imbalanced dataset
+As we stated in figure 1, the problem at hand is imbalanced in nature as heart disease will likely impact a small proportion of individuals who were included in the survey. Therefore, data sampling techniques (i.e. SMOTE, Under/Over-sampling) will be implemented to balance the target variable to further increase the model performance. 
+ 
+
+
+### Evaluation Metrics
+Evaluation by classification accuracy is potentially misleading given a model with no skill could achieve 91% classification accuracy by selecting the majority class (negative CHD/MI diagnosis). Accuracy also assumes that false positives and negatives have equal importance (Jeni et. al., 2013). If this model were used for diagnosis, failure to diagnose true CHD/MI conditions would have more severe health consequences than false positive diagnoses. The first evaluation priority of the model is the minimisation of false negatives (maximise recall). However, a model that generates too many false positives will not be accepted as a useful diagnostic tool. 
+
+Taking into account the factors above, the evaluation metric must place greater weight on minimizing false negatives but still consider the rate of false positives. The metric must also be reasonably resilient to significant class asymmetry. An appropriate evaluation metric is the F Beta Measure or F2 (beta = 2). F2 is an aggregated assessment of the model’s ability to minimise false positives (maximize precision) and minimise false negatives (maximise recall) but places greater weight on minimising false negatives and is robust to class imbalance (Jeni et. al., 2013). 
+ 
+### Project Plan
+**Data Cleansing and pre-processing**: The first stage involves the Exploratory Data Analysis (EDA) to identify further challenges as well as build initial visualisations to get a better grasp of the data. Furthermore, data cleansing and pre-processing is also a part of this stage, which will be later used to build the classification models. A key challenge for the pre-processing task is to address missing values through imputations and omission.
+
+**Build and optimize models**: the optimised dataset will be used to fit and optimise five classification models: Logistic Regression, K-Nearest Neighbour, Random Forest, Support Vector Machine, and Ridge Lasso Regression. The models will be optimized and tested using cross-validation techniques. The performance measure for all models will be analysed and a recommendation on which model should be used for this classification problem based on the feedback from the cross-validation testing. 
+
+**Presentation and Documentation**: Finally, the final report is to be compiled based to describe the techniques used, models, and a summary of the key findings, along with the presentation pack to be presented. 
+
+---------------------------------------------------------------------------------------------------------------------------------------
+##### Reference:
+
+1. L. A. Jeni, J. F. Cohn and F. De La Torre (2013). Facing Imbalanced Data--Recommendations for the Use of Performance Metrics. In: Humaine Association Conference on Affective Computing and Intelligent Interaction, 2013, pp. 245-251, doi: 10.1109/ACII.2013.47. https://ieeexplore.ieee.org/abstract/document/6681438 
+
+
+------------------
+##### Appendix-1:
+```{r, echo=FALSE, out.width="50%"}
+missing.variables <- cbind(miss_var_summary(dat)[1],round(miss_var_summary(dat)[3],2))
+
+missing.variables$ismissing <-  missing.variables$pct_miss != 0
+ismissing <- table(missing.variables$ismissing)
+ismissing <- as.data.frame(t(ismissing))
+ismissing$Response <- c('Variables without Missing Values','Variables with Missing Values')
+
+
+ggplot(ismissing, aes(x = Freq, y = Response, fill = Response)) +
+  geom_col() +
+  geom_text(
+    aes(label = Freq), 
+    ## make labels left-aligned
+    hjust = 0.5, nudge_x = 10
+  ) +
+  xlim(0, 250) +
+  labs(title = "Variables with at least one missing value",
+              
+              x = "Number of variables", 
+              y = "isMissing"
+              
+       )+   
+  coord_flip() + 
+  ## change plot appearance
+  theme_minimal()
+
+```

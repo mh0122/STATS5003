@@ -1,30 +1,696 @@
 ---
-title: "Untitled"
+title: "Group Assignment STAT5003"
 author: "Moal9049"
 date: "`r Sys.Date()`"
-output: html_document
+output: 
+  html_document:
+  code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+#install.packages('ggdist')
+
+library("dplyr")
+library(ggplot2)
+library(ggdist)
+library(corrplot)
+library(caret)
+library(class)
 ```
 
-## R Markdown
+# Data Cleaning 
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+``` {r Read dataset, echo: TRUE}
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+#read data
+dat <- read.csv("2015.csv")
 
-```{r cars}
-summary(cars)
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
+```{r clean dataset, echo: TRUE}
+## selected columns
+data <- select(dat, 'X_MICHD',
+                                         'X_RFHYPE5',  
+                                         'TOLDHI2', 'X_CHOLCHK', 
+                                         'X_BMI5', 
+                                         'SMOKE100', 
+                                         'CVDSTRK3', 'DIABETE3', 
+                                         'X_TOTINDA', 
+                                         'X_FRTLT1', 'X_VEGLT1', 
+                                         'X_RFDRHV5', 
+                                         'HLTHPLN1', 'MEDCOST', 
+                                         'GENHLTH', 'MENTHLTH', 'PHYSHLTH', 'DIFFWALK', 
+                                         'SEX', 'X_AGEG5YR', 'EDUCA', 'INCOME2')
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+
+## 2 Cleaning the dataset 
+## 2.1 drop all records with missing N/A values
+data <- data[complete.cases(data),] # reduced the dataset by 100k records
+
+
+
+
+
+## 2.2 Modify and clean the values to be more suitable to ML algorithms
+
+# in this part we use the codebook to clean up the values 
+## link >https://www.cdc.gov/brfss/annual_data/2015/pdf/codebook15_llcp.pdf<
+
+#####################################
+
+## add factors for variables that are factors and clean up the factors
+
+## X_MICHD = Respondents that have ever reported having coronary heart disease (CHD) or myocardial infarction (MI) 
+## 1 = Reported having MI or CHD; 
+## 2 = Did not report having MI or CHD
+
+## update values (Did not report having MI or CHD = 0)
+data[data$X_MICHD == 2,]$X_MICHD <- 0
+
+## change to factor 
+data$X_MICHD <- as.factor(data$X_MICHD)
+
+## rename column 
+data <- rename(data, HeartDiseaseorAttack = X_MICHD)
+
+## check 
+#table(data$HeartDiseaseorAttack)
+
+#####################################
+
+## X_RFHYPE5 = Adults who have been told they have high blood pressure by a doctor, nurse, or other health professional 
+## 1 = No, 
+## 2 = Yes, 
+## 9 = Missing/not answered
+
+## update values 
+## 0 = No, 
+## 1 = Yes, 
+data[data$X_RFHYPE5 == 1,]$X_RFHYPE5 <- 0
+data[data$X_RFHYPE5 == 2,]$X_RFHYPE5 <- 1
+
+## drop not answered ie 9 
+data <- data[data$X_RFHYPE5 != 9,]
+
+## change to factor 
+data$X_RFHYPE5 <- as.factor(data$X_RFHYPE5)
+
+## rename column 
+data <- rename(data, HighBP = X_RFHYPE5)
+
+## check 
+#table(data$HighBP)
+
+
+#####################################
+
+
+## TOLDHI2 = Adults who have been told they have high blood pressure by a doctor, nurse, or other health professional 
+## 1 = Yes, 
+## 2 = No, 
+## 7 = Don't know, 
+## 9 = Refused / missing, blank = not asked
+#table(data$TOLDHI2)
+
+## update value(s)
+## 0 = No, 
+## 1 = Yes, 
+data[data$TOLDHI2 == 2,]$TOLDHI2 <- 0
+
+## drop not answered ie 7 & 9 
+data <- data[data$TOLDHI2 != 9,]
+data <- data[data$TOLDHI2 != 7,]
+
+## change to factor 
+data$TOLDHI2 <- as.factor(data$TOLDHI2)
+
+## rename column 
+data <- rename(data, HighChol = TOLDHI2)
+
+## check 
+#table(data$HighChol)
+
+#####################################
+
+
+## X_CHOLCHK = Cholesterol check within past five years  
+## 1 = Had cholesterol checked in past 5 years , 
+## 2 = Did not have cholesterol checked in past 5 years , 
+## 3 = Have never had cholesterol checked, 
+## 9 = missing or refsued 
+#table(data$X_CHOLCHK)
+
+## update value(s)
+data[data$X_CHOLCHK == 2,]$X_CHOLCHK <- 0
+
+
+## drop not answered ie 7 & 9 
+data <- data[data$X_CHOLCHK != 9,]
+data <- data[data$X_CHOLCHK != 7,]
+
+## change to factor 
+data$X_CHOLCHK <- as.factor(data$X_CHOLCHK)
+
+## rename column 
+data <- rename(data, CholCheck = X_CHOLCHK)
+
+## check 
+#table(data$CholCheck)
+
+#####################################
+
+
+## X_BMI5 = Body Mass Index (BMI) 
+## 1 - 9999 1 or greater Notes: WTKG3/(HTM4*HTM4) (Has 2 implied decimal places), 
+## BLANK = refused to answer, missing
+#table(data$X_BMI5)
+#sum(is.na(data$X_BMI5)) #no missing 
+
+## update value(s)
+## round values (2099 => 20.99)
+data$X_BMI5 <- round(data$X_BMI5/100,2)
+
+## rename column 
+data <- rename(data, BMI = X_BMI5)
+
+## check 
+#table(data$BMI)
+
+#####################################
+
+
+## SMOKE100 = Have you smoked at least 100 cigarettes in your entire life?   [Note:  5 packs = 100 cigarettes] 
+## 1 = Yes, 
+## 2 = No, 
+## 7 = Don't know, 
+## 9 = Refused / missing
+#table(data$SMOKE100)
+
+## update value(s)
+## 0 = No,
+## 1 = Yes, 
+data[data$SMOKE100 == 2,]$SMOKE100 <- 0
+
+
+## drop not answered ie 7 & 9 
+data <- data[data$SMOKE100 != 9,]
+data <- data[data$SMOKE100 != 7,]
+
+## change to factor 
+data$SMOKE100 <- as.factor(data$SMOKE100)
+
+## rename column 
+data <- rename(data, Smoker = SMOKE100)
+
+## check 
+#table(data$Smoker)
+
+#####################################
+
+## CVDSTRK3 = (Ever told) you had a stroke. 
+## 1 = Yes, 
+## 2 = No, 
+## 7 = Don't know, 
+## 9 = Refused / missing
+#table(data$CVDSTRK3)
+
+## update value(s)
+## 0 = No,
+## 1 = Yes, 
+data[data$CVDSTRK3 == 2,]$CVDSTRK3 <- 0
+
+
+## drop not answered ie 7 & 9 
+data <- data[data$CVDSTRK3 != 9,]
+data <- data[data$CVDSTRK3 != 7,]
+
+## change to factor 
+data$CVDSTRK3 <- as.factor(data$CVDSTRK3)
+
+## rename column 
+data <- rename(data, Stroke = CVDSTRK3)
+
+## check 
+#table(data$Stroke)
+
+#####################################
+
+## DIABETE3 = (Ever told) you have diabetes  (If "Yes" and respondent is female, ask "Was this only when you were pregnant?". If Respondent says pre-diabetes or borderline diabetes, use response code 4.) 
+## 1 = Yes, 
+## 2 = Yes, but female told only during pregnancy, 
+## 3 = No, 
+## 4 = No, pre-diabetes or borderline diabetes, 
+## 7 = Don't know, 
+## 9 = Refused / missing, blank = not asked
+#table(data$DIABETE3)
+#sum(is.na(data$DIABETE3)) # no blank
+
+## update value(s)
+## 0 = No |OR| Yes, but female told only during pregnancy  
+## 1 = No, pre-diabetes or borderline diabetes, 
+## 2 = Yes, 
+data[data$DIABETE3 == 2,]$DIABETE3 <- 0
+data[data$DIABETE3 == 3,]$DIABETE3 <- 0
+data[data$DIABETE3 == 1,]$DIABETE3 <- 2
+data[data$DIABETE3 == 4,]$DIABETE3 <- 1
+
+## drop not answered ie 7 & 9 
+data <- data[data$DIABETE3 != 9,]
+data <- data[data$DIABETE3 != 7,]
+
+## change to factor 
+data$DIABETE3 <- as.factor(data$DIABETE3)
+
+## rename column 
+data <- rename(data, Diabetes = DIABETE3)
+
+## check 
+#table(data$Diabetes)
+
+#####################################
+
+## X_TOTINDA = Adults who reported doing physical activity or exercise during the past 30 days other than their regular job
+## 1 = Had physical activity or exercise , 
+## 2 = No physical activity or exercise in last 30 days , 
+## 9 = RDon’t know/Refused/Missing 
+#table(data$X_TOTINDA)
+#sum(is.na(data$X_TOTINDA)) # no blank
+
+## update value(s)
+## 0 = No physical activity or exercise in last 30 days , 
+## 1 = Had physical activity or exercise , 
+data[data$X_TOTINDA == 2,]$X_TOTINDA <- 0
+
+## drop not answered ie 9 
+data <- data[data$X_TOTINDA != 9,]
+
+## change to factor 
+data$X_TOTINDA <- as.factor(data$X_TOTINDA)
+
+## rename column 
+data <- rename(data, PhysActivity = X_TOTINDA)
+
+## check 
+#table(data$PhysActivity)
+
+#####################################
+
+## _FRTLT1 = Consume Fruit 1 or more times per day 
+## 1 = Consumed fruit one or more times per day , 
+## 2 = Consumed fruit less than one time per day , 
+## 9 = Don’t know/Refused/Missing 
+#table(data$X_FRTLT1)
+#sum(is.na(data$X_FRTLT1)) # no blank
+
+## update value(s)
+data[data$X_FRTLT1 == 2,]$X_FRTLT1 <- 0
+
+## drop not answered ie 7 & 9 
+data <- data[data$X_FRTLT1 != 9,]
+
+## change to factor 
+data$X_FRTLT1 <- as.factor(data$X_FRTLT1)
+
+## rename column 
+data <- rename(data, Fruits = X_FRTLT1)
+
+## check 
+#table(data$Fruits)
+
+#####################################
+
+## _VEGLT1 = Consume Fruit 1 or more times per day 
+## 1 = Consumed vegetables one or more times per day , 
+## 2 = Consumed vegetables less than one time per day , 
+## 9 = Don’t know/Refused/Missing 
+#table(data$X_VEGLT1)
+#sum(is.na(data$X_VEGLT1)) # no blank
+
+## update value(s)
+data[data$X_VEGLT1 == 2,]$X_VEGLT1 <- 0
+
+## drop not answered ie 7 & 9 
+data <- data[data$X_VEGLT1 != 9,]
+
+## change to factor 
+data$X_VEGLT1 <- as.factor(data$X_VEGLT1)
+
+## rename column 
+data <- rename(data, Veggies = X_VEGLT1)
+
+## check 
+#table(data$Veggies)
+
+#####################################
+
+## X_RFDRHV5 = Heavy drinkers (adult men having more than 14 drinks per week and adult women having more than 7 drinks per week)
+## 1 = No , 
+## 2 = Yes , 
+## 9 = Don’t know/Refused/Missing 
+#table(data$X_RFDRHV5)
+#sum(is.na(data$X_RFDRHV5)) # no blank
+
+## update value(s)
+data[data$X_RFDRHV5 == 1,]$X_RFDRHV5 <- 0
+data[data$X_RFDRHV5 == 2,]$X_RFDRHV5 <- 1
+
+## drop not answered ie 7 & 9 
+data <- data[data$X_RFDRHV5 != 9,]
+
+## change to factor 
+data$X_RFDRHV5 <- as.factor(data$X_RFDRHV5)
+
+## rename column 
+data <- rename(data, HeavyAlcoholConsumption = X_RFDRHV5)
+
+## check 
+#table(data$HeavyAlcoholConsumption)
+
+#####################################
+
+## HLTHPLN1 = Do you have any kind of health care coverage, including health insurance, prepaid plans such as HMOs, or government plans such as Medicare, or Indian Health Service?
+## 1 = Yes , 
+## 2 = No , 
+## 7 = Don’t know/Not Sure, 
+## 9 = Refused
+#table(data$HLTHPLN1)
+#sum(is.na(data$HLTHPLN1)) # no blank
+
+## update value(s)
+data[data$HLTHPLN1 == 2,]$HLTHPLN1 <- 0
+
+## drop not answered ie 7 & 9 
+data <- data[data$HLTHPLN1 != 9,]
+data <- data[data$HLTHPLN1 != 7,]
+
+## change to factor 
+data$HLTHPLN1 <- as.factor(data$HLTHPLN1)
+
+## rename column 
+data <- rename(data, AnyHealthcare = HLTHPLN1)
+
+## check 
+#table(data$AnyHealthcare)
+
+#####################################
+
+## MEDCOST = Was there a time in the past 12 months when you needed to see a doctor but could not because of cost? 
+## 1 = Yes , 
+## 2 = No , 
+## 7 = Don’t know/Not Sure, 
+## 9 = Refused
+#table(data$MEDCOST)
+#sum(is.na(data$MEDCOST)) # no blank
+
+## update value(s)
+data[data$MEDCOST == 2,]$MEDCOST <- 0
+
+## drop not answered ie 7 & 9 
+data <- data[data$MEDCOST != 9,]
+data <- data[data$MEDCOST != 7,]
+
+## change to factor 
+data$MEDCOST <- as.factor(data$MEDCOST)
+
+## rename column 
+data <- rename(data, NoDocbcCost = MEDCOST)
+
+## check 
+#table(data$NoDocbcCost)
+
+#####################################
+
+## GENHLTH = Would you say that in general your health is: 
+## 1 = Excellent, 
+## 2 = Very good, 
+## 3= Good, 4 = Fair, 
+## 5= Poor, 
+## 7 = Don't know/Not Sure, 
+## 9 = Refused, BLANK = Not Aksed
+#table(data$GENHLTH)
+#sum(is.na(data$GENHLTH)) # no blank
+
+## drop not answered ie 7 & 9 
+data <- data[data$GENHLTH != 9,]
+data <- data[data$GENHLTH != 7,]
+
+## change to factor 
+data$GENHLTH <- as.factor(data$GENHLTH)
+
+## rename column 
+data <- rename(data, GenHlth = GENHLTH)
+
+## check 
+#table(data$GenHlth)
+
+#####################################
+
+## MENTHLTH = Was there a time in the past 12 months when you needed to see a doctor but could not because of cost? 
+## 1 - 30 = Number of days  , 
+## 88 = None , 
+## 77 = Don’t know/Not Sure, 
+## 99 = Refused
+#table(data$MENTHLTH)
+#sum(is.na(data$MENTHLTH)) # no blank
+
+## update value(s)
+data[data$MENTHLTH == 88,]$MENTHLTH <- 0
+
+## drop not answered ie 7 & 9 
+data <- data[data$MENTHLTH != 99,]
+data <- data[data$MENTHLTH != 77,]
+
+## change to factor 
+data$MENTHLTH <- as.numeric(data$MENTHLTH)
+
+## rename column 
+data <- rename(data, MentHlth = MENTHLTH)
+
+## check 
+#table(data$MentHlth)
+
+#####################################
+
+## PHYSHLTH = Now thinking about your physical health, which includes physical illness and injury, for how many days during the past 30 days was your physical health not good?
+## 1 - 30 = Number of days  , 
+## 88 = None , 
+## 77 = Don’t know/Not Sure, 
+## 99 = Refused
+#table(data$PHYSHLTH)
+#sum(is.na(data$PHYSHLTH)) # no blank
+
+## update value(s)
+data[data$PHYSHLTH == 88,]$PHYSHLTH <- 0
+
+## drop not answered ie 7 & 9 
+data <- data[data$PHYSHLTH != 99,]
+data <- data[data$PHYSHLTH != 77,]
+
+## change to factor 
+data$PHYSHLTH <- as.numeric(data$PHYSHLTH)
+
+## rename column 
+data <- rename(data, PhysHlth = PHYSHLTH)
+
+## check 
+#table(data$PhysHlth)
+
+#####################################
+
+## DIFFWALK = Do you have serious difficulty walking or climbing stairs? 
+## 1 = Yes , 
+## 2 = No , 
+## 7 = Don’t know/Not Sure, 
+## 9 = Refused
+#table(data$DIFFWALK)
+#sum(is.na(data$DIFFWALK)) # no blank
+
+## update value(s)
+data[data$DIFFWALK == 2,]$DIFFWALK <- 0
+
+## drop not answered ie 7 & 9 
+data <- data[data$DIFFWALK != 9,]
+data <- data[data$DIFFWALK != 7,]
+
+## change to factor 
+data$DIFFWALK <- as.factor(data$DIFFWALK)
+
+## rename column 
+data <- rename(data, DiffWalk = DIFFWALK)
+
+## check 
+#table(data$DiffWalk)
+
+#####################################
+
+## SEX = Indicate sex of respondent. 
+## 1 = MALE , 
+## 2 = FEMALE
+#table(data$SEX)
+#sum(is.na(data$SEX)) # no blank
+
+## update value(s)
+data[data$SEX == 2,]$SEX <- 0
+
+## change to factor 
+data$SEX <- as.factor(data$SEX)
+
+## rename column 
+data <- rename(data, Sex = SEX)
+
+## check 
+#table(data$Sex)
+
+#####################################
+
+## X_AGEG5YR = Fourteen-level age category 
+## 1 = 18 <= AGE <= 24  , 
+## 2 = 25 <= AGE <= 29 , 
+## .... 
+## 13 = Age 80 or older  , 
+## 14 = Don’t know/Refused/Missing 
+#table(data$X_AGEG5YR)
+#sum(is.na(data$X_AGEG5YR)) # no blank
+
+
+## drop not answered ie 7 & 9 
+data <- data[data$X_AGEG5YR != 14,]
+
+
+## rename column 
+data <- rename(data, AgeGroup = X_AGEG5YR)
+
+## check 
+#table(data$AgeGroup)
+
+#####################################
+
+## EDUCA = What is the highest grade or year of school you completed? 
+## 1 = Never attended school or only kindergarten, 
+## 2 = Grades 1 through 8 (Elementary), 
+## 3= Grades 9 through 11 (Some high school), 
+## 4 = Grade 12 or GED (High school graduate), 
+## 5= College 1 year to 3 years (Some college or technical school), 
+## 6= College 4 years or more (College graduate), 
+## 9 = Refused
+#table(data$EDUCA)
+#sum(is.na(data$EDUCA)) # no blank
+
+
+## drop not answered ie 7 & 9 
+data <- data[data$EDUCA != 9,]
+
+## change to factor 
+data$EDUCA <- as.factor(data$EDUCA)
+
+## rename column 
+data <- rename(data, Education = EDUCA)
+
+## check 
+#table(data$Education)
+
+#####################################
+
+## INCOME2 = Is your annual household income from all sources:  (If respondent refuses at any income level, code "Refused.")
+## 1 = Less than $10,000 , 
+## 2 = GLess than $15,000 ($10,000 to less than $15,000), 
+## 3= Less than $20,000 ($15,000 to less than $20,000) , 
+## 4 = Less than $25,000 ($20,000 to less than $25,000), 
+## 5= Less than $35,000 ($25,000 to less than $35,000), 
+## 6= Less than $50,000 ($35,000 to less than $50,000), 
+## 7 = Less than $75,000 ($50,000 to less than $75,000),  
+## 8 = $75,000 or more, 77 = Don’t know/Not sure, 99 = Refused
+#table(data$INCOME2)
+#sum(is.na(data$INCOME2)) # no blank
+
+
+## drop not answered ie 7 & 9 
+data <- data[data$INCOME2 != 99,]
+data <- data[data$INCOME2 != 77,]
+
+## change to factor 
+data$INCOME2 <- as.factor(data$INCOME2)
+
+## rename column 
+data <- rename(data, Income = INCOME2)
+
+## check 
+#table(data$Income)
+
+#####################################
+
+## Check cleaned data structure 
+dim(data)
+
+
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+
+
+``` {r distribution of BMI across people with and without a heart problems}
+
+
+ggplot(data, aes(x = HeartDiseaseorAttack, y = BMI, fill = HeartDiseaseorAttack)) + 
+  ggdist::stat_halfeye(
+    adjust = .5, 
+    width = .6, 
+    .width = 0, 
+    justification = -.3, 
+    point_colour = NA) +
+  geom_point(
+    size = 0.3,
+    alpha = .05,
+    position = position_jitter(
+      seed = 5003, width = .1 )
+  ) + 
+  geom_boxplot(
+    width = .25, 
+    outlier.shape = NA
+  ) + theme_minimal()+
+  coord_cartesian(xlim = c(1.2, NA), clip = "off")
+```
+
+
+``` {r}
+#convert data to numeric in order to run correlations
+  #convert to factor first to keep the integrity of the data - each value will become a number rather than turn into NA
+  df_cor <- dat[,-c(seq(1:7))]
+  df_cor <- df_cor %>% mutate_if(is.character, as.factor)
+  df_cor <- df_cor %>% mutate_if(is.factor, as.numeric)
+  #run a correlation and drop the insignificant ones
+  corr <- cor(df_cor)
+
+  #prepare to drop duplicates and correlations of 1     
+#  corr[lower.tri(corr,diag=TRUE)] <- NA 
+  #drop perfect correlations
+  corr[corr == 1] <- NA 
+  #turn into a 3-column table
+  corr <- as.data.frame(as.table(corr))
+  #remove the NA values from above 
+  corr <- na.omit(corr) 
+  
+  #select significant values  
+#  corr <- subset(corr, abs(Freq) > 0.5) 
+  #sort by highest correlation
+#  corr <- corr[order(-abs(corr$Freq)),] 
+  #print table
+  #print(corr)
+
+  #turn corr back into matrix in order to plot with corrplot
+  mtx_corr <- reshape2::acast(corr, Var1~Var2, value.var="Freq")
+  
+  #plot correlations visually
+  corrplot(mtx_corr, method ='color', is.corr=TRUE, tl.col="black", col = COL2('PuOr', 20), na.label=" ", number.cex = 0.5,   tl.cex = 0.5)
+  
+```
+
+
+
+
+
