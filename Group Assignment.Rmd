@@ -25,7 +25,7 @@ library(class)
 ``` {r Read dataset, echo: TRUE}
 
 #read data
-dat <- read.csv("2015.csv")
+dat <- read.csv("2015Trimmed.csv")
 
 ```
 
@@ -660,7 +660,7 @@ ggplot(data, aes(x = HeartDiseaseorAttack, y = BMI, fill = HeartDiseaseorAttack)
 ``` {r}
 #convert data to numeric in order to run correlations
   #convert to factor first to keep the integrity of the data - each value will become a number rather than turn into NA
-  df_cor <- dat[,-c(seq(1:7))]
+  df_cor <- data
   df_cor <- df_cor %>% mutate_if(is.character, as.factor)
   df_cor <- df_cor %>% mutate_if(is.factor, as.numeric)
   #run a correlation and drop the insignificant ones
@@ -669,7 +669,7 @@ ggplot(data, aes(x = HeartDiseaseorAttack, y = BMI, fill = HeartDiseaseorAttack)
   #prepare to drop duplicates and correlations of 1     
 #  corr[lower.tri(corr,diag=TRUE)] <- NA 
   #drop perfect correlations
-  corr[corr == 1] <- NA 
+  #corr[corr == 1] <- NA 
   #turn into a 3-column table
   corr <- as.data.frame(as.table(corr))
   #remove the NA values from above 
