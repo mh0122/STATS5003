@@ -988,6 +988,29 @@ roc.curve(test$HeartDiseaseorAttack, pred_glm_smote, plotit = FALSE)
 
 We evaluate the model performance on test data by finding the roc auc score. We see that the auc score on the original dataset is 0.849, and 0.850 on the various sampling techniques to the data.
 
+## glm confusion matrix
+```{r confusion matrix standard glm}
+
+
+#ROC Curve 
+par(pty = "s")
+glm.roc.info <- roc(test$HeartDiseaseorAttack, pred_glm_down, plot=TRUE, legacy.axes = TRUE, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'red', lwd = 2)
+
+
+#choose the best cutoff point 
+glm.roc.df <- data.frame( 
+  tpp = glm.roc.info$sensitivities , 
+  fpp = (1-glm.roc.info$specificities), 
+  thresholds = glm.roc.info$thresholds
+  )
+
+# 70% threshold 
+glm.cutoff <- min(glm.roc.df[glm.roc.df$tpp < 70 ,"thresholds"])
+predicted <- as.factor(ifelse(pred_glm_down > glm.cutoff, 1, 0))
+confusionMatrix(data =predicted, reference = test$HeartDiseaseorAttack)
+```
+
+
 # Decision Trees (CART)
 
 ```{r decision tree}
@@ -1163,7 +1186,22 @@ roc.curve(test$HeartDiseaseorAttack, xgb_pred_smote, plotit = FALSE)
 XGBoost with standard 84.1% 
 
 ```{r confusion matrix standard XGBoost}
-predicted <- as.factor(ifelse(xgb_pred > 0.25, 1, 0))
+
+#ROC Curve 
+par(pty = "s")
+roc.info <- roc(test$HeartDiseaseorAttack, xgb_pred, plot=TRUE, legacy.axes = TRUE, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'red', lwd = 2)
+
+
+#choose the best cutoff point 
+roc.df <- data.frame( 
+  tpp = roc.info$sensitivities , 
+  fpp = (1-roc.info$specificities), 
+  thresholds = roc.info$thresholds
+  )
+
+# 80% threshold 
+XGBoost.cutoff <- 1-max(roc.df[roc.df$tpp > 0.5 ,]$thresholds)
+predicted <- as.factor(ifelse(xgb_pred > XGBoost.cutoff, 1, 0))
 confusionMatrix(data =predicted, reference = test$HeartDiseaseorAttack)
 ```
 
@@ -1175,5 +1213,14 @@ names <- dimnames(data.matrix(train[,-1]))[[2]]
 importance_matrix <- xgb.importance(names, model = xgb_fit)
 # Nice graph
 xgb.plot.importance(importance_matrix[1:10,])
+```
+#compare all models
+```{r compare ROC}
+par(pty = "s")
+roc(test$HeartDiseaseorAttack, xgb_pred, plot=TRUE, legacy.axes = TRUE, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'red', lwd = 2)
+plot.roc(test$HeartDiseaseorAttack, prob_up[,2], percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'blue', lwd = 2, add = TRUE)
+plot.roc(test$HeartDiseaseorAttack, pred_dt_down[,2], percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'black', lwd = 2, add = TRUE)
+plot.roc(test$HeartDiseaseorAttack, pred_glm_up, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'purple', lwd = 1, lty = 2, add = TRUE)
+legend("bottomright", legend =c("XGBoost", "RandomForst", "Decision Tree", "Logisitc Regression"), col = c('red','blue','black','purple'), lwd = 1)
 ```
 
