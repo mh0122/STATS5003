@@ -26,6 +26,7 @@ knitr::opts_chunk$set(echo = TRUE)
 #install.packages("Rborist")
 #install.packages("xgboost")
 
+library(boot) #glm cross-validation 
 library(xgboost) # for xgboost model
 library(Rborist)# for random forest model
 library(rpart)# for decision tree model
@@ -884,11 +885,12 @@ There appears to be no separation between the two classes.
 # Modeling Approach
 Standard machine learning algorithms struggle with accuracy on imbalanced data for the following reasons:
 
-ML algorithms struggle with accuracy because of the unequal distribution in dependent variable.This causes the performance of existing classifiers to get biased towards majority class. The algorithms are accuracy driven i.e. they aim to minimize the overall error to which the minority class contributes very little. ML algorithms assume that the data set has balanced class distributions. They also assume that errors obtained from different classes have same cost.
+ML algorithms struggle with accuracy because of the unequal distribution in dependent variable. This causes the performance of existing classifiers to get biased towards majority class. The algorithms are accuracy driven i.e. they aim to minimize the overall error to which the minority class contributes very little. ML algorithms assume that the data set has balanced class distributions. They also assume that errors obtained from different classes have same cost.
 
 The methods to deal with this problem are widely known as ‘Sampling Methods’. Generally, these methods aim to modify an imbalanced data into balanced distribution using some mechanism. The modification occurs by altering the size of original data set and provide the same proportion of balance.
 
-These methods have acquired higher importance after many researches have proved that balanced data results in improved overall classification performance compared to an imbalanced data set. Hence, it’s important to learn them.
+These methods have acquired higher importance after many researches have proved that balanced data results in improved overall classification performance compared to an imbalanced data set. Hence, it’s important to learn them. Firstly, the data will be split into training and test 80/20 respectivly. It is important to note that sampling techniques will only be applied to the training set and not the testing set.
+
 ```{r split into train and test}
 set.seed(5003)
 
@@ -900,7 +902,7 @@ paste0("training set include ",nrow(train)," observations (i.e. ",round(nrow(tra
 ```
 
 
-Below are the methods used here to treat the imbalanced dataset:
+Secondly, below sampling methods will be used to treat the imbalanced dataset:
 
 Undersampling Oversampling Synthetic Data Generation
 
@@ -915,19 +917,23 @@ A possible problem with this method is that removing observations may cause the 
 
 ```{r undersampling}
 ## Under sampling 
+set.seed(5003)
+
 data_balanced_under <- ovun.sample(HeartDiseaseorAttack ~ ., data = train, method = "under")$data
 
 ```
 
 
 ### Oversampling
-This method works with minority class. It replicates the observations from minority class to balance the data. It is also known as upsampling. Similar to undersampling, this method also can be divided into two types: Random Oversampling and Informative Oversampling.
+This method works with minority class. It replicates the observations from minority class to balance the data. Similar to undersampling, this method also can be divided into two types: Random Oversampling and Informative Oversampling.
 
 Random oversampling balances the data by randomly oversampling the minority class. Informative oversampling uses a pre-specified criterion and synthetically generates minority class observations.
 
-An advantage of using this method is that it leads to no information loss. The disadvantage of using this method is that, since oversampling simply adds replicated observations in original data set, it ends up adding multiple observations of several types, thus leading to overfitting.
+An advantage of using this method is that it leads to no information loss. The disadvantage of using this method is that, since oversampling simply adds replicated observations in original data set, it ends up adding multiple observations of several types, thus make the model more likely to overfit. 
 ```{r oversampling}
 ## oversampling
+set.seed(5003)
+
 data_balanced_over <- ovun.sample(HeartDiseaseorAttack ~ ., data = train, method = "over")$data
 
 ```
@@ -938,11 +944,11 @@ In simple words, instead of replicating and adding the observations from the min
 
 In regards to synthetic data generation, synthetic minority oversampling technique (SMOTE) is a powerful and widely used method. SMOTE algorithm draws artificial samples by choosing points that lie on the line connecting the rare observation to one of its nearest neighbors in the feature space. ROSE (random over-sampling examples) uses smoothed bootstrapping to draw artificial samples from the feature space neighbourhood around the minority class.
 
-It is important to note that sampling techniques should only be applied to the training set and not the testing set.
-
-Our modeling approach will involve training a single classifier on the train set with class imbalance suitably altered using each of the techniques above. Depending on which technique yields the best roc-auc score on a holdout test set, we will build subsequent models using that chosen technique.
+The modeling approach taking will involve training all classifiers on the train set with class imbalance suitably altered using each of the techniques above. The chosen model will be based on which technique and model yields the best ROC-AUC score on a holdout test set. 
 
 ```{r ROSE and SMOTE}
+set.seed(5003)
+
 ## ROSE 
 data_balanced_rose <- ROSE(HeartDiseaseorAttack ~ ., data  = train)$data 
 
@@ -972,21 +978,15 @@ pred_glm_rose <- predict(glm_fit_rose, newdata = test, type = 'response')
 pred_glm_smote <- predict(glm_fit_smote, newdata = test, type = 'response')
 
 #AUC
-"Standard Model"
 roc.curve(test$HeartDiseaseorAttack, pred_glm, plotit = FALSE)
-
-"Oversampling Model"
 roc.curve(test$HeartDiseaseorAttack, pred_glm_up, plotit = FALSE)
-"Undersampling Model"
 roc.curve(test$HeartDiseaseorAttack, pred_glm_down, plotit = FALSE)
-"ROSE Model"
 roc.curve(test$HeartDiseaseorAttack, pred_glm_rose, plotit = FALSE)
-"SMOTE Model"
 roc.curve(test$HeartDiseaseorAttack, pred_glm_smote, plotit = FALSE)
 
 ```
 
-We evaluate the model performance on test data by finding the roc auc score. We see that the auc score on the original dataset is 0.849, and 0.850 on the various sampling techniques to the data.
+We evaluate the model performance on test data by finding the roc auc score. We see that the auc score on the original test set is 0.849, and 0.850 on the various sampling techniques to the data.
 
 ## glm confusion matrix
 ```{r confusion matrix standard glm}
@@ -1029,15 +1029,10 @@ pred_dt_rose <- predict(dt_fit_rose, newdata = test, method = "class")
 pred_dt_smote <- predict(dt_fit_smote, newdata = test, method = "class")
 
 #AUC
-"Standard Model"
 roc.curve(test$HeartDiseaseorAttack, pred_dt[,2], plotit = FALSE)
-"Oversampling Model"
 roc.curve(test$HeartDiseaseorAttack, pred_dt_up[,2], plotit = FALSE)
-"Undersampling Model"
 roc.curve(test$HeartDiseaseorAttack, pred_dt_down[,2], plotit = FALSE)
-"ROSE Model"
 roc.curve(test$HeartDiseaseorAttack, pred_dt_rose[,2], plotit = FALSE)
-"SMOTE Model"
 roc.curve(test$HeartDiseaseorAttack, pred_dt_smote[,2], plotit = FALSE)
 ```
 
@@ -1083,15 +1078,10 @@ prob_rose <- rf_pred_rose$prob
 prob_smote <- rf_pred_smote$prob
 
 #AUC 
-"Standard Model"
 roc.curve(test$HeartDiseaseorAttack, prob[,2], plotit = FALSE)
-"Oversampling Model"
 roc.curve(test$HeartDiseaseorAttack, prob_up[,2], plotit = FALSE)
-"Undersampling Model"
 roc.curve(test$HeartDiseaseorAttack, prob_down[,2], plotit = FALSE)
-"ROSE Model"
 roc.curve(test$HeartDiseaseorAttack, prob_rose[,2], plotit = FALSE)
-"SMOTE Model"
 roc.curve(test$HeartDiseaseorAttack, prob_smote[,2], plotit = FALSE)
 ```
 
@@ -1214,6 +1204,7 @@ importance_matrix <- xgb.importance(names, model = xgb_fit)
 # Nice graph
 xgb.plot.importance(importance_matrix[1:10,])
 ```
+
 #compare all models
 ```{r compare ROC}
 par(pty = "s")
@@ -1224,3 +1215,70 @@ plot.roc(test$HeartDiseaseorAttack, pred_glm_up, percent = TRUE, xlab = "False P
 legend("bottomright", legend =c("XGBoost", "RandomForst", "Decision Tree", "Logisitc Regression"), col = c('red','blue','black','purple'), lwd = 1)
 ```
 
+Logistic regression combined with oversampling has the best ROC/AUC score. 
+
+
+
+
+## corss-validation with glm
+```{r glm with kfold validation}
+# create full model 
+cv_glm_fit <- glm(HeartDiseaseorAttack ~ ., data = data, family = 'binomial')
+cv_glm_predicted <- as.factor(ifelse(cv_glm_fit$fitted.values > 0.1, 1, 0))
+confusionMatrix(data = cv_glm_predicted, reference = data$HeartDiseaseorAttack, positive = "1")
+roc.curve(data$HeartDiseaseorAttack, cv_glm_predicted, plotit = TRUE)
+
+
+# apply 10-fold cross-validation to glm
+
+set.seed(5003)
+
+glm_fold <- createFolds(data[["HeartDiseaseorAttack"]], k = 10)
+
+#create a function to split 
+splitterFunc <- function(x, data, n = nrow(data)){
+  group = factor(ifelse(seq(n) %in% x, "Test", "Training"))
+  split(data, group)
+  }
+
+X_train <- lapply(glm_fold, splitterFunc, data = data, n = nrow(data))
+
+# build glm model 
+glmFun <- function(x, label.name = "HeartDiseaseorAttack"){
+  cv_fit_glm <- glm(HeartDiseaseorAttack ~ ., 
+                     data = x$Training, 
+                     family = 'binomial')
+  cv_predictions_glm <- predict(cv_fit_glm, 
+                         newdata = x$Test, 
+                         type = 'response')
+  predictions <- as.factor(ifelse(cv_predictions_glm > 0.1, 1, 0))
+  actuals <- x$Test[[label.name]]
+  list(predictions = predictions, actuals = actuals)
+}
+
+glm.results <- lapply(X_train, glmFun)
+
+#cv confusion matrix 
+ConfMatrix <- lapply(glm.results, function(x) confusionMatrix(x$predictions, x$actuals, positive = "1"))
+#extracting TPP & TNP 
+cv_glm_Sensitivity <- vapply(ConfMatrix, function(x) x[["byClass"]][["Sensitivity"]], numeric(1))
+cv_glm_Specificity <- vapply(ConfMatrix, function(x) x[["byClass"]][["Specificity"]], numeric(1))
+
+cv_glm_Sensitivity <- data.frame( value = cv_glm_Sensitivity, ind = 'Sensitivity') #combine cv-scores 
+cv_glm_Specificity <- data.frame( value = cv_glm_Specificity, ind = 'Specificty') #combine cv-scores 
+cv_glm_scores  <- rbind(cv_glm_Sensitivity, cv_glm_Specificity)
+
+#visualise measure results violin plot (for my liking)
+ggplot(cv_glm_scores, aes(x = ind, y = value))  + 
+  geom_violin(trim=FALSE) + 
+  stat_summary(fun.data=mean_sdl) + 
+  theme_minimal() + 
+  geom_boxplot(width=0.1)+ 
+  labs(title = "Logistic Regression Validation Results",
+              subtitle = "Cross Validation 10 folds ",
+              x = "Performance Measures", y = "Value",
+  )
+
+```
+
+Logisitic Regression avg. Sensitivity = 79% and Specificity = 75% with 10-fold cross validation 
