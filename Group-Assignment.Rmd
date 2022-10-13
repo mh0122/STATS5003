@@ -25,7 +25,12 @@ knitr::opts_chunk$set(echo = TRUE)
 #install.packages("rpart")
 #install.packages("Rborist")
 #install.packages("xgboost")
+#install.packages("rpart.plot") 
+# install.packages("mlr")
 
+
+library("mlr") #model investigation package
+library("rpart.plot")  # decision treep visualisation 
 library(boot) #glm cross-validation 
 library(xgboost) # for xgboost model
 library(Rborist)# for random forest model
@@ -35,7 +40,7 @@ library("dplyr") # for data preping
 library(ggplot2) #for visualisations 
 library(ggdist) #for visualisations 
 library(corrplot) #for visualisations 
-library(caret) 
+library(caret) #stats and modeling package
 library(class)
 library(pROC)
 library(ROCR)
@@ -599,8 +604,6 @@ data <- rename(data, Sex = SEX)
 ## drop not answered ie 7 & 9 
 data <- data[data$X_AGEG5YR != 14,]
 
-## change to factor 
-data$X_AGEG5YR <- as.factor(data$X_AGEG5YR)
 
 ## rename column 
 data <- rename(data, AgeGroup = X_AGEG5YR)
@@ -674,15 +677,22 @@ str(data)
 
 ### Sclaing 
 ``` {r Feature engineering}
+#create dummy variables (one hot encoding)
+dummyModel <- dummyVars(HeartDiseaseorAttack ~ Diabetes+GenHlth+Education+Income, data = data)
+dataX <- as.data.frame(predict(dummyModel, newdata = data))
+dataX <- cbind(dplyr::select(data, -c("Diabetes","GenHlth","Education","Income")),dataX)
+dataX <- data.frame(lapply(dataX, function(x) as.numeric(as.character(x))))
+dataX$HeartDiseaseorAttack <- as.factor(dataX$HeartDiseaseorAttack)
 
-#scale 
-data$BMI <- (data$BMI-min(data$BMI))/(max(data$BMI) - min(data$BMI))
-data$MentHlth <- (data$MentHlth-min(data$MentHlth))/(max(data$MentHlth) - min(data$MentHlth))
-data$PhysHlth <- (data$PhysHlth-min(data$PhysHlth))/(max(data$PhysHlth) - min(data$PhysHlth))
 
+#normalise 
+rangeModel <- preProcess(dataX, method = "range")
+dataX <- predict(rangeModel, newdata = dataX)
+str(dataX)
 ```
 
 # Basic Data Exploration
+
 
 ### target variable 
 
@@ -692,8 +702,8 @@ data$PhysHlth <- (data$PhysHlth-min(data$PhysHlth))/(max(data$PhysHlth) - min(da
 
 
 # classify missing features
-target <- tibble(table(data$HeartDiseaseorAttack[!is.na(data$HeartDiseaseorAttack)]))
-target <- rename(target, Count = `table(data$HeartDiseaseorAttack[!is.na(data$HeartDiseaseorAttack)])`)
+target <- tibble(table(dataX$HeartDiseaseorAttack[!is.na(dataX$HeartDiseaseorAttack)]))
+target <- rename(target, Count = `table(dataX$HeartDiseaseorAttack[!is.na(dataX$HeartDiseaseorAttack)])`)
 target$Response <- c('No','Yes')
 target$tlabel <- paste0(round(target$Count/1000,1),'k')
 
@@ -720,11 +730,49 @@ ggplot(target, aes(x = Count/1000, y = Response, fill = Response)) +
 The dataset is very imbalanced with over 90% of cases being not having any CVD. 
 
 
+### Variables with low variance 
+```{r nearzeroval}
+# #explore values with less than 5% variation 
+# colnames(dataX[,nearZeroVar(dataX, freqCut = 95/5, uniqueCut = 10)])
+# x <- as.data.frame(dataX[,c('CholCheck', 'Stroke','AnyHealthcare', 'Diabetes.1')])
+#            
+# featurePlot(x, 
+#             dataX$HeartDiseaseorAttack,
+#             plot = 'density')
+```
+
+### investigate low information features
+Perform Recursive Feature Elimination 
+
+```{r Example of recursive feature elimination}
+# subsets <- c( 5 )
+# set.seed(3005)
+# 
+# #use 50% of the dataset
+# trainIndex <- createDataPartition(dataX$HeartDiseaseorAttack, p = 0.5, list = FALSE)
+# rfe.train <- dataX[trainIndex,]
+# 
+# #create Recursive Feature Elimination (rfe) to identify low importnat variables
+# rfeCtrl <- rfeControl(functions = rfFuncs,
+#                       method = "cv",
+#                       verbose = FALSE)
+# rfProfile <- rfe(x = rfe.train[,2:40],
+#                 y = rfe.train[,1],
+#                 sizes = subsets,
+#                 rfeControl = rfeCtrl)
+# rfProfile
+# ggplot(rfProfile)
+# plot(rfProfile)
+# plot(rfProfile, metric = "Rsquared")
+```
+
+
+
 ### correlation analysis
 ``` {r correlation plot}
 #convert data to numeric in order to run correlations
   #convert to factor first to keep the integrity of the data - each value will become a number rather than turn into NA
-  df_cor <- data
+  df_cor <- dataX
   df_cor <- df_cor %>% mutate_if(is.character, as.factor)
   df_cor <- df_cor %>% mutate_if(is.factor, as.numeric)
   #run a correlation and drop the insignificant ones
@@ -767,10 +815,10 @@ as we see, there is a positive correlation between CVDs and high blood pressure,
 #### CVD and smoking 
 ```{r CVD and smoking}
 #smokers are at more risk of having CVDs 
-hadHDA <-data[data$HeartDiseaseorAttack==1,] 
+hadHDA <-dataX[dataX$HeartDiseaseorAttack==1,] 
 
 
-ggplot(data, aes( y = Smoker, fill = HeartDiseaseorAttack))+
+ggplot(dataX, aes( y = Smoker, fill = HeartDiseaseorAttack))+
   geom_bar()+
   theme_minimal()
 ```
@@ -780,17 +828,17 @@ Smokers are more likely to have CVDs.
 #### CVD and physical activity
 ```{r CVD and physical activity}
 #physical activity not necessarily prevent HDA
-ggplot(data, aes( y = PhysActivity, fill = HeartDiseaseorAttack))+
+ggplot(dataX, aes( y = PhysActivity, fill = HeartDiseaseorAttack))+
   geom_bar()+
   theme_minimal()
 ```
 
 
 #### CVD and Diabetes 
-```{r CVD and Diabetes }
+```{r CVD and Diabetes}
 #Diabetics respondents are at more risk of being diagnosed with CDV
-data %>%
-  group_by(Diabetes,HeartDiseaseorAttack) %>%
+dataX %>%
+  group_by(Diabetes.0,Diabetes.1,Diabetes.2,HeartDiseaseorAttack) %>%
   summarise(cnt = n()) %>%
   mutate(freq = formattable::percent(cnt / sum(cnt), 1))
 ```
@@ -831,52 +879,54 @@ ggplot(org.BMI, aes(x = HeartDiseaseorAttack, y = BMI, fill = HeartDiseaseorAtta
 The overall of population in the database is overweight, however, people with CVD have a slightly higher BMI. 
 
 
+
+
 # Visualization t-SNE
 To try to understand the data better, we will try visualizing the data using t-Distributed Stochastic Neighbour Embedding, a technique to reduce dimensionality. To train the model, perplexity was set to 50, 100, 500 and 700. The visualisation should give us a hint as to whether there exist any “discoverable” patterns in the data which the model could learn. If there is no obvious structure in the data, it is more likely that the model will perform poorly.
 
 ```{r tSNE}
-
-# Use 10% of data to compute t-SNE
-tsne_subset <- 1:as.integer(0.01*nrow(data))
-
-
-#prep 50
-tsne50 <- Rtsne(data[tsne_subset,-c(1, 31)], perplexity = 50, theta = 0.5, pca = F, verbose = F, max_iter = 500, dims = 2, check_duplicates = F)
-
-classes <- as.factor(data$HeartDiseaseorAttack[tsne_subset])
-tsne_mat <- as.data.frame(tsne50$Y)
-prep50 <- ggplot(tsne_mat, aes(x = V1, y = V2)) + geom_point(aes(color = classes)) + theme_minimal() +  ggtitle("t-SNE prep = 50") + scale_color_manual(values = c("#E69F00", "#56B4E9"))
-
-#prep 100
-tsne100 <- Rtsne(data[tsne_subset,-c(1, 31)], perplexity = 100, theta = 0.5, pca = F, verbose = F, max_iter = 500, dims = 2, check_duplicates = F)
-
-classes <- as.factor(data$HeartDiseaseorAttack[tsne_subset])
-tsne_mat <- as.data.frame(tsne100$Y)
-prep100 <- ggplot(tsne_mat, aes(x = V1, y = V2)) + geom_point(aes(color = classes)) + theme_minimal() +  ggtitle("t-SNE prep = 100") + scale_color_manual(values = c("#E69F00", "#56B4E9"))
-
-
-#prep 500
-tsne500 <- Rtsne(data[tsne_subset,-c(1, 31)], perplexity = 500, theta = 0.5, pca = F, verbose = F, max_iter = 1000, dims = 2, check_duplicates = F)
-
-classes <- as.factor(data$HeartDiseaseorAttack[tsne_subset])
-tsne_mat <- as.data.frame(tsne500$Y)
-prep500 <- ggplot(tsne_mat, aes(x = V1, y = V2)) + geom_point(aes(color = classes)) + theme_minimal() +  ggtitle("t-SNE prep = 500") + scale_color_manual(values = c("#E69F00", "#56B4E9"))
-
-#prep 700
-tsne700 <- Rtsne(data[tsne_subset,-c(1, 31)], perplexity = 700, theta = 0.5, pca = F, verbose = F, max_iter = 5000, dims = 2, check_duplicates = F)
-
-classes <- as.factor(data$HeartDiseaseorAttack[tsne_subset])
-tsne_mat <- as.data.frame(tsne700$Y)
-prep700 <- ggplot(tsne_mat, aes(x = V1, y = V2)) + geom_point(aes(color = classes)) + theme_minimal() +  ggtitle("t-SNE prep = 700") + scale_color_manual(values = c("#E69F00", "#56B4E9"))
-
-grid.arrange(
-  prep50,
-  prep100,
-  prep500, 
-  prep700,
-  nrow =2,
-  top = "Comparing tSNE prep"
-)
+# 
+# # Use 10% of data to compute t-SNE
+# tsne_subset <- 1:as.integer(0.01*nrow(data))
+# 
+# 
+# #prep 50
+# tsne50 <- Rtsne(data[tsne_subset,-c(1, 31)], perplexity = 50, theta = 0.5, pca = F, verbose = F, max_iter = 500, dims = 2, check_duplicates = F)
+# 
+# classes <- as.factor(data$HeartDiseaseorAttack[tsne_subset])
+# tsne_mat <- as.data.frame(tsne50$Y)
+# prep50 <- ggplot(tsne_mat, aes(x = V1, y = V2)) + geom_point(aes(color = classes)) + theme_minimal() +  ggtitle("t-SNE prep = 50") + scale_color_manual(values = c("#E69F00", "#56B4E9"))
+# 
+# #prep 100
+# tsne100 <- Rtsne(data[tsne_subset,-c(1, 31)], perplexity = 100, theta = 0.5, pca = F, verbose = F, max_iter = 500, dims = 2, check_duplicates = F)
+# 
+# classes <- as.factor(data$HeartDiseaseorAttack[tsne_subset])
+# tsne_mat <- as.data.frame(tsne100$Y)
+# prep100 <- ggplot(tsne_mat, aes(x = V1, y = V2)) + geom_point(aes(color = classes)) + theme_minimal() +  ggtitle("t-SNE prep = 100") + scale_color_manual(values = c("#E69F00", "#56B4E9"))
+# 
+# 
+# #prep 500
+# tsne500 <- Rtsne(data[tsne_subset,-c(1, 31)], perplexity = 500, theta = 0.5, pca = F, verbose = F, max_iter = 1000, dims = 2, check_duplicates = F)
+# 
+# classes <- as.factor(data$HeartDiseaseorAttack[tsne_subset])
+# tsne_mat <- as.data.frame(tsne500$Y)
+# prep500 <- ggplot(tsne_mat, aes(x = V1, y = V2)) + geom_point(aes(color = classes)) + theme_minimal() +  ggtitle("t-SNE prep = 500") + scale_color_manual(values = c("#E69F00", "#56B4E9"))
+# 
+# #prep 700
+# tsne700 <- Rtsne(data[tsne_subset,-c(1, 31)], perplexity = 700, theta = 0.5, pca = F, verbose = F, max_iter = 5000, dims = 2, check_duplicates = F)
+# 
+# classes <- as.factor(data$HeartDiseaseorAttack[tsne_subset])
+# tsne_mat <- as.data.frame(tsne700$Y)
+# prep700 <- ggplot(tsne_mat, aes(x = V1, y = V2)) + geom_point(aes(color = classes)) + theme_minimal() +  ggtitle("t-SNE prep = 700") + scale_color_manual(values = c("#E69F00", "#56B4E9"))
+# 
+# grid.arrange(
+#   prep50,
+#   prep100,
+#   prep500, 
+#   prep700,
+#   nrow =2,
+#   top = "Comparing tSNE prep"
+# )
 ```
 
 
@@ -894,10 +944,11 @@ These methods have acquired higher importance after many researches have proved 
 ```{r split into train and test}
 set.seed(5003)
 
-inTrain <- createDataPartition(data$HeartDiseaseorAttack, p = 0.8)[[1]]
-train <- data[ inTrain, ]
-test <- data[-inTrain, ]
-paste0("training set include ",nrow(train)," observations (i.e. ",round(nrow(train)/nrow(data)*100,0),"% of total records)")
+inTrain <- createDataPartition(dataX$HeartDiseaseorAttack, p = 0.8)[[1]]
+train <- dataX[ inTrain, ]
+test <- dataX[-inTrain, ]
+labels <- test$HeartDiseaseorAttack
+paste0("training set include ",nrow(train)," observations (i.e. ",round(nrow(train)/nrow(dataX)*100,0),"% of total records)")
 
 ```
 
@@ -970,6 +1021,8 @@ glm_fit_down <- glm(HeartDiseaseorAttack ~ ., data = data_balanced_under, family
 glm_fit_rose <- glm(HeartDiseaseorAttack ~ ., data = data_balanced_rose, family = 'binomial')
 glm_fit_smote <- glm(HeartDiseaseorAttack ~ ., data = data_balanced_smote, family = 'binomial')
 
+
+
 #predict models 
 pred_glm <- predict(glm_fit, newdata = test, type = 'response')
 pred_glm_up <- predict(glm_fit_up, newdata = test, type = 'response')
@@ -978,25 +1031,38 @@ pred_glm_rose <- predict(glm_fit_rose, newdata = test, type = 'response')
 pred_glm_smote <- predict(glm_fit_smote, newdata = test, type = 'response')
 
 #AUC
-roc.curve(test$HeartDiseaseorAttack, pred_glm, plotit = FALSE)
-roc.curve(test$HeartDiseaseorAttack, pred_glm_up, plotit = FALSE)
-roc.curve(test$HeartDiseaseorAttack, pred_glm_down, plotit = FALSE)
-roc.curve(test$HeartDiseaseorAttack, pred_glm_rose, plotit = FALSE)
-roc.curve(test$HeartDiseaseorAttack, pred_glm_smote, plotit = FALSE)
+roc_pred_glm <- roc.curve(test$HeartDiseaseorAttack, pred_glm, plotit = FALSE)
+roc_pred_glm_up <- roc.curve(test$HeartDiseaseorAttack, pred_glm_up, plotit = FALSE)
+roc_pred_glm_down <- roc.curve(test$HeartDiseaseorAttack, pred_glm_down, plotit = FALSE)
+roc_pred_glm_rose <- roc.curve(test$HeartDiseaseorAttack, pred_glm_rose, plotit = FALSE)
+roc_pred_glm_smote <- roc.curve(test$HeartDiseaseorAttack, pred_glm_smote, plotit = FALSE)
+
+# We evaluate the glm model performance on test data by visualising the roc score. 
+{par(pty = "m") 
+    roc(test$HeartDiseaseorAttack, pred_glm, plot=TRUE, legacy.axes = TRUE, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'red', lwd = 1)
+    plot.roc(test$HeartDiseaseorAttack, pred_glm_up, percent = TRUE, col = 'blue', lwd = 1, add = TRUE)
+    plot.roc(test$HeartDiseaseorAttack, pred_glm_down, percent = TRUE, col = 'black', lwd = 1, add = TRUE)
+    plot.roc(test$HeartDiseaseorAttack, pred_glm_rose, percent = TRUE,  col = 'purple', lwd = 1, add = TRUE)
+    plot.roc(test$HeartDiseaseorAttack, pred_glm_smote, percent = TRUE,  col = 'orange', lwd = 1, add = TRUE)
+    legend("bottomright", legend =c("glm/baseline", "glm/oversampling", "glm/undersampling", "glm/ROSE", "glm/SMOTE"), col = c('red','blue','black','purple', 'orange'), lwd = 1)}
+
+
+
+
 
 ```
 
-We evaluate the model performance on test data by finding the roc auc score. We see that the auc score on the original test set is 0.849, and 0.850 on the various sampling techniques to the data.
+The ROC score is relatively the same across all different sampling techniques compared to the baseline model, therefore, we will use the baseline model.  
+
+
 
 ## glm confusion matrix
 ```{r confusion matrix standard glm}
 
-
-#ROC Curve 
-par(pty = "s")
-glm.roc.info <- roc(test$HeartDiseaseorAttack, pred_glm_down, plot=TRUE, legacy.axes = TRUE, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'red', lwd = 2)
+glm.roc.info <- roc(test$HeartDiseaseorAttack, pred_glm, legacy.axes=TRUE)
 
 
+ 
 #choose the best cutoff point 
 glm.roc.df <- data.frame( 
   tpp = glm.roc.info$sensitivities , 
@@ -1004,11 +1070,95 @@ glm.roc.df <- data.frame(
   thresholds = glm.roc.info$thresholds
   )
 
-# 70% threshold 
-glm.cutoff <- min(glm.roc.df[glm.roc.df$tpp < 70 ,"thresholds"])
-predicted <- as.factor(ifelse(pred_glm_down > glm.cutoff, 1, 0))
-confusionMatrix(data =predicted, reference = test$HeartDiseaseorAttack)
+# 77% threshold 
+glm.cutoff <- min(glm.roc.df[glm.roc.df$tpp < 0.77 ,"thresholds"])
+predicted <- as.factor(ifelse(pred_glm > glm.cutoff, 1, 0))
+confusionMatrix(data =predicted, reference = test$HeartDiseaseorAttack, positive = "1")
+
+# visualise 
+glm.roc.coords <- coords(roc(test$HeartDiseaseorAttack, pred_glm), "all")
+
+ggplot(glm.roc.coords, aes(.data[["threshold"]])) + 
+  geom_line(aes(y = .data[['specificity']], colour = "Specificity")) + 
+  geom_line(aes(y = .data[['sensitivity']], colour = "Sensitivity")) +
+  labs(title = "GLM Specificity vs Sensitivity",
+              x = "Cutoff", 
+              y = "Sensitivity/Specificity"
+       ) + 
+  scale_x_continuous(expand = c(0, 0), limits = c(0, 1))+ 
+  geom_vline(xintercept =glm.cutoff, linetype="dashed", 
+                color = "black", size=0.5)+
+  scale_color_manual(name = "", values = c( Specificity = "#F8766D", Sensitivity = "#00BFC4", Cutoff = 'black')) +
+  
+  ## change plot appearance
+  theme_minimal()
+
+
 ```
+
+## corss-validation with glm
+```{r glm with kfold validation}
+# # create full model 
+# cv_glm_fit <- glm(HeartDiseaseorAttack ~ ., data = train, family = 'binomial')
+# cv_glm_predicted <- as.factor(ifelse(cv_glm_fit$fitted.values > 0.1, 1, 0))
+# confusionMatrix(data = cv_glm_predicted, reference = train$HeartDiseaseorAttack, positive = "1")
+# roc.curve(train$HeartDiseaseorAttack, cv_glm_predicted, plotit = TRUE)
+# 
+# roc(train$HeartDiseaseorAttack, cv_glm_fit$fitted.values, plot=TRUE, legacy.axes = TRUE, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'red', lwd = 1)
+
+# apply 10-fold cross-validation to glm
+
+set.seed(5003)
+glm_fold <- createFolds(data[["HeartDiseaseorAttack"]], k = 10)
+
+#create a function to split 
+splitterFunc <- function(x, data, n = nrow(data)){
+  group = factor(ifelse(seq(n) %in% x, "Test", "Training"))
+  split(data, group)
+  }
+
+X_train <- lapply(glm_fold, splitterFunc, data = data, n = nrow(data))
+
+# build glm model 
+glmFun <- function(x, label.name = "HeartDiseaseorAttack"){
+  cv_fit_glm <- glm(HeartDiseaseorAttack ~ ., 
+                     data = x$Training, 
+                     family = 'binomial')
+  cv_predictions_glm <- predict(cv_fit_glm, 
+                         newdata = x$Test, 
+                         type = 'response')
+  predictions <- as.factor(ifelse(cv_predictions_glm > 0.1, 1, 0))
+  actuals <- x$Test[[label.name]]
+  list(predictions = predictions, actuals = actuals)
+}
+
+glm.results <- lapply(X_train, glmFun)
+
+#cv confusion matrix 
+ConfMatrix <- lapply(glm.results, function(x) confusionMatrix(x$predictions, x$actuals, positive = "1"))
+#extracting TPP & TNP 
+cv_glm_Sensitivity <- vapply(ConfMatrix, function(x) x[["byClass"]][["Sensitivity"]], numeric(1))
+cv_glm_Specificity <- vapply(ConfMatrix, function(x) x[["byClass"]][["Specificity"]], numeric(1))
+
+cv_glm_Sensitivity <- data.frame( value = cv_glm_Sensitivity, ind = 'Sensitivity') #combine cv-scores 
+cv_glm_Specificity <- data.frame( value = cv_glm_Specificity, ind = 'Specificty') #combine cv-scores 
+cv_glm_scores  <- rbind(cv_glm_Sensitivity, cv_glm_Specificity)
+
+#visualise measure results violin plot (for my liking)
+ggplot(cv_glm_scores, aes(x = ind, y = value))  + 
+  geom_violin(trim=FALSE) + 
+  stat_summary(fun.data=mean_sdl) + 
+  theme_minimal() + 
+  geom_boxplot(width=0.1)+ 
+  labs(title = "Logistic Regression Validation Results",
+              subtitle = "Cross Validation 10 folds ",
+              x = "Performance Measures", y = "Value",
+  )
+
+```
+
+Logistic Regression avg. Sensitivity = 78% and Specificity = 75% with 10-fold cross validation 
+
 
 
 # Decision Trees (CART)
@@ -1029,16 +1179,71 @@ pred_dt_rose <- predict(dt_fit_rose, newdata = test, method = "class")
 pred_dt_smote <- predict(dt_fit_smote, newdata = test, method = "class")
 
 #AUC
-roc.curve(test$HeartDiseaseorAttack, pred_dt[,2], plotit = FALSE)
-roc.curve(test$HeartDiseaseorAttack, pred_dt_up[,2], plotit = FALSE)
-roc.curve(test$HeartDiseaseorAttack, pred_dt_down[,2], plotit = FALSE)
-roc.curve(test$HeartDiseaseorAttack, pred_dt_rose[,2], plotit = FALSE)
-roc.curve(test$HeartDiseaseorAttack, pred_dt_smote[,2], plotit = FALSE)
+roc_pred_dt <- roc.curve(test$HeartDiseaseorAttack, pred_dt[,2], plotit = FALSE)$auc
+roc_pred_dt_up <- roc.curve(test$HeartDiseaseorAttack, pred_dt_up[,2], plotit = FALSE)$auc
+roc_pred_dt_down <- roc.curve(test$HeartDiseaseorAttack, pred_dt_down[,2], plotit = FALSE)$auc
+roc_pred_dt_rose <- roc.curve(test$HeartDiseaseorAttack, pred_dt_rose[,2], plotit = FALSE)$auc
+roc_pred_dt_smote <- roc.curve(test$HeartDiseaseorAttack, pred_dt_smote[,2], plotit = FALSE)$auc
+
+#visualise AUC 
+{par(pty = "m") 
+    roc(test$HeartDiseaseorAttack, pred_dt[,2], plot=TRUE, legacy.axes = TRUE, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'red', lwd = 1)
+    plot.roc(test$HeartDiseaseorAttack, pred_dt_up[,2], percent = TRUE, col = 'blue', lwd = 1, add = TRUE)
+    plot.roc(test$HeartDiseaseorAttack, pred_dt_down[,2], percent = TRUE, col = 'black', lwd = 1, add = TRUE)
+    plot.roc(test$HeartDiseaseorAttack, pred_dt_rose[,2], percent = TRUE,  col = 'purple', lwd = 1, add = TRUE)
+    plot.roc(test$HeartDiseaseorAttack, pred_dt_smote[,2], percent = TRUE,  col = 'orange', lwd = 1, add = TRUE)
+    legend("bottomright", legend =c("dt/baseline", "dt/oversampling", "dt/undersampling", "dt/ROSE", "dt/SMOTE"), col = c('red','blue','black','purple', 'orange'), lwd = 1)}
 ```
 
-the standard model has the worse AUC score 50%, followed by SMOTE 74.2%, while all other models scored 78% 
+The baseline model for decision tree had a bad AUC score (50%), while both over/undersampling had an AUC score of 78%. We will use the DT model with undersampling to investigate the decision tree model 
 
-#Random Forest
+### dt paramter tunning
+```{r investigate undersampling model model}
+
+# Exploring the model
+printcp(dt_fit_down, digits = 3)
+
+
+#visualise decision tree 
+rpart.plot(dt_fit_down, roundint = TRUE,
+box.palette = "BuBn", extra = 104,
+type = 5, fallen.leaves = FALSE)
+
+
+
+```
+
+
+``` {r hyperparamter tuning decision tree with crossvalidation}
+
+# rpart hyperparameters tuning
+dt.ctrl <- trainControl(method = "cv",
+                        number = 10,
+                        savePredictions = "final")
+dt.fit.cv <- train(HeartDiseaseorAttack ~., data_balanced_under, method = 'rpart', 
+                   trControl = dt.ctrl, 
+                   tuneLength = 30)
+
+
+#visualise cv model
+rpart.plot(dt.fit.cv$finalModel, roundint = TRUE,
+box.palette = "BuBn", extra = 104,
+type = 5, fallen.leaves = FALSE)
+
+
+dt.predict.cv <- predict(dt.fit.cv, test)
+confusionMatrix(table(test[,1], dt.predict.cv), positive = '1')
+
+
+roc.curve(test$HeartDiseaseorAttack, dt.predict.cv, plotit = FALSE)$auc
+
+
+print(dt.fit.cv)
+plot(dt.fit.cv)
+
+
+```
+# Random Forest
 
 ```{r random forest}
 #split target from response
@@ -1088,7 +1293,7 @@ roc.curve(test$HeartDiseaseorAttack, prob_smote[,2], plotit = FALSE)
 Random forest has better performance than decision tree and logistic regression with undersamping scoring AUC 82.9%, followed by oversamping 82.7% 
 
 
-#XGBoost 
+# XGBoost 
 
 ```{r XGBoost}
 #prep
@@ -1207,11 +1412,11 @@ xgb.plot.importance(importance_matrix[1:10,])
 
 #compare all models
 ```{r compare ROC}
-par(pty = "s")
-roc(test$HeartDiseaseorAttack, xgb_pred, plot=TRUE, legacy.axes = TRUE, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'red', lwd = 2)
-plot.roc(test$HeartDiseaseorAttack, prob_up[,2], percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'blue', lwd = 2, add = TRUE)
-plot.roc(test$HeartDiseaseorAttack, pred_dt_down[,2], percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'black', lwd = 2, add = TRUE)
-plot.roc(test$HeartDiseaseorAttack, pred_glm_up, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'purple', lwd = 1, lty = 2, add = TRUE)
+par(pty = "s") 
+roc(test$HeartDiseaseorAttack, xgb_pred, plot=TRUE, legacy.axes = TRUE, percent = TRUE, xlab = "False Positive", ylab= "True Positive", col = 'red', lwd = 1)
+plot.roc(test$HeartDiseaseorAttack, prob_up[,2], percent = TRUE, col = 'blue', lwd = 1, add = TRUE)
+plot.roc(test$HeartDiseaseorAttack, pred_dt_down[,2], percent = TRUE, col = 'black', lwd = 1, add = TRUE)
+plot.roc(test$HeartDiseaseorAttack, pred_glm_up, percent = TRUE,  col = 'purple', lwd = 1, lty = 2, add = TRUE)
 legend("bottomright", legend =c("XGBoost", "RandomForst", "Decision Tree", "Logisitc Regression"), col = c('red','blue','black','purple'), lwd = 1)
 ```
 
@@ -1220,65 +1425,85 @@ Logistic regression combined with oversampling has the best ROC/AUC score.
 
 
 
-## corss-validation with glm
-```{r glm with kfold validation}
-# create full model 
-cv_glm_fit <- glm(HeartDiseaseorAttack ~ ., data = data, family = 'binomial')
-cv_glm_predicted <- as.factor(ifelse(cv_glm_fit$fitted.values > 0.1, 1, 0))
-confusionMatrix(data = cv_glm_predicted, reference = data$HeartDiseaseorAttack, positive = "1")
-roc.curve(data$HeartDiseaseorAttack, cv_glm_predicted, plotit = TRUE)
+# feature selections 
 
-
-# apply 10-fold cross-validation to glm
-
-set.seed(5003)
-
-glm_fold <- createFolds(data[["HeartDiseaseorAttack"]], k = 10)
-
-#create a function to split 
-splitterFunc <- function(x, data, n = nrow(data)){
-  group = factor(ifelse(seq(n) %in% x, "Test", "Training"))
-  split(data, group)
-  }
-
-X_train <- lapply(glm_fold, splitterFunc, data = data, n = nrow(data))
-
-# build glm model 
-glmFun <- function(x, label.name = "HeartDiseaseorAttack"){
-  cv_fit_glm <- glm(HeartDiseaseorAttack ~ ., 
-                     data = x$Training, 
-                     family = 'binomial')
-  cv_predictions_glm <- predict(cv_fit_glm, 
-                         newdata = x$Test, 
-                         type = 'response')
-  predictions <- as.factor(ifelse(cv_predictions_glm > 0.1, 1, 0))
-  actuals <- x$Test[[label.name]]
-  list(predictions = predictions, actuals = actuals)
-}
-
-glm.results <- lapply(X_train, glmFun)
-
-#cv confusion matrix 
-ConfMatrix <- lapply(glm.results, function(x) confusionMatrix(x$predictions, x$actuals, positive = "1"))
-#extracting TPP & TNP 
-cv_glm_Sensitivity <- vapply(ConfMatrix, function(x) x[["byClass"]][["Sensitivity"]], numeric(1))
-cv_glm_Specificity <- vapply(ConfMatrix, function(x) x[["byClass"]][["Specificity"]], numeric(1))
-
-cv_glm_Sensitivity <- data.frame( value = cv_glm_Sensitivity, ind = 'Sensitivity') #combine cv-scores 
-cv_glm_Specificity <- data.frame( value = cv_glm_Specificity, ind = 'Specificty') #combine cv-scores 
-cv_glm_scores  <- rbind(cv_glm_Sensitivity, cv_glm_Specificity)
-
-#visualise measure results violin plot (for my liking)
-ggplot(cv_glm_scores, aes(x = ind, y = value))  + 
-  geom_violin(trim=FALSE) + 
-  stat_summary(fun.data=mean_sdl) + 
-  theme_minimal() + 
-  geom_boxplot(width=0.1)+ 
-  labs(title = "Logistic Regression Validation Results",
-              subtitle = "Cross Validation 10 folds ",
-              x = "Performance Measures", y = "Value",
-  )
-
+``` {r feature selection for glm} 
+# 
+#   cv_fit_glm <- glm(HeartDiseaseorAttack ~ ., 
+#                      data = x$Training, 
+#                      family = 'binomial')
+#   cv_predictions_glm <- predict(cv_fit_glm, 
+#                          newdata = x$Test, 
+#                          type = 'response')
+#   predictions <- as.factor(ifelse(cv_predictions_glm > 0.1, 1, 0))
+#   actuals <- x$Test[[label.name]]
+#   list(predictions = predictions, actuals = actuals)
+# 
+# 
+# #build function the stepwise function 
+# selectFeatureDirect <- function(train, test, features){
+#   
+#   ## identify a feature to be selected
+#   current.smallest.tpr <- Inf
+#   selected.i <- NULL
+#   for(i in seq(ncol(train))) {  
+#     current.f <- colnames(train)[i]
+#     
+#     # Can't add features that are already in our list 
+#     if(current.f %in% c(features, "HeartDiseaseorAttack")) { next }
+#     current.train <- cbind(train[, c(features, current.f, "HeartDiseaseorAttack")])
+#     
+#     #fit model 
+#     model <- glm(HeartDiseaseorAttack ~ ., 
+#                      data = current.train, 
+#                      family = 'binomial')
+#     
+#     #predict and calculate SME 
+#     current.test <- test[,c(features, current.f, "HeartDiseaseorAttack")]
+#     pred.test <- 
+#             predict(model, 
+#                          newdata = current.test, 
+#                          type = 'response')
+#     predictions.test <- as.factor(as.data.frame(ifelse(pred.test > 0.1, 1, 0))[,1])
+#     actuals.test <- as.factor(current.test[["HeartDiseaseorAttack"]])
+#     test.tpr <- confusionMatrix(data = predictions.test, reference = actuals.test, positive = "1")[["byClass"]][["Sensitivity"]]
+#     
+#     #compare SME and update list       
+#     if(test.tpr < current.smallest.tpr) {
+#         current.smallest.tpr <- test.tpr
+#         selected.i <- colnames(train)[i]
+#     }
+#   }
+#   return(selected.i)
+# }
+# 
+# 
+# features <- NULL
+# # select the 1 to 5 best features using knn as a wrapper classifier
+# for (j in 1:25) {
+#   selected.i <- selectFeatureDirect(train, test, features)
+# 
+#   # add the best feature from current run
+#   features <- c(features, selected.i)
+# }
+# 
+# features
 ```
 
-Logisitic Regression avg. Sensitivity = 79% and Specificity = 75% with 10-fold cross validation 
+
+```{r forward feature selection}
+# 
+# library(leaps)
+# forward.credit <- regsubsets(HeartDiseaseorAttack ~ ., data = train,
+#                            method = "forward", nvmax = 100)
+# summary.forward.credit <- summary(forward.credit)
+# 
+# min.cp <- which.min(summary.forward.credit$cp)
+# plot(summary.forward.credit$cp[''], type = "l",
+#      main = "Best subset selection- Mallows C_p",
+#      ylab = "Mallows C_p measure",
+#      xlab = "Number of features")
+# points(summary.forward.credit$cp)
+# points(min.cp, summary.forward.credit$cp[min.cp], pch = 4, col = "blue", cex = 2)
+
+```
