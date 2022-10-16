@@ -674,6 +674,35 @@ str(data)
 
 ```
 
+```{r}
+# datanumeric <- as_tibble(data)
+# datanumeric
+```
+
+```{r}
+
+datamatrix <- data.matrix(data, rownames.force = NA) #converting df to matrix
+PCAdatamatrix <- datamatrix[,-1] #dropping cvd column
+
+par(mfrow=c(1,2)) # to plot multiple charts
+
+pca1 <- prcomp(PCAdatamatrix, scale. = TRUE)  #PCA
+
+PCvar <- summary(pca1)$importance[2,] #extracting pca variance by component vector
+
+plot(PCvar, xlab= "Number of variables", main = "PCA by component") #plotting pca variance by component vector
+
+plot(cumsum(pca1$sdev^2 / sum(pca1$sdev^2)), type="b", main = "Cummulative explained variance" ,xlab="PCA count", ylab="variance") #plotting cummulative explained variance
+
+rm(list = ls())
+#biplot(pca1, scale = 0) Doesn't look too good
+
+
+
+
+```
+Applying PCA on the chosen 21 variables isn't a good idea since they are all contributing actively to explain the variance. Apart from one component that contributes 16%; the rest are all single figure percentage contributors (less than 10%)
+
 
 ### Sclaing 
 ``` {r Feature engineering}
@@ -1152,7 +1181,7 @@ ggplot(cv_glm_scores, aes(x = ind, y = value))  +
   geom_boxplot(width=0.1)+ 
   labs(title = "Logistic Regression Validation Results",
               subtitle = "Cross Validation 10 folds ",
-              x = "Performance Measures", y = "Value",
+              x = "Performance MeasuresYe", y = "Value",
   )
 
 ```
